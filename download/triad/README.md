@@ -23,20 +23,25 @@ import json
 r = TRIAD_Scanner().scan('https://github.com/expressjs/express')
 print(json.dumps(r['findings'][:2], indent=2))"
 
-# as a service
+# as a service (JSON API at POST /scan, scan console at GET /)
 uvicorn server:app --port 8000
 curl -X POST localhost:8000/scan -H 'Content-Type: application/json' \
      -d '{"target": "http://localhost:3000", "demo": false}'
+#   then open http://localhost:8000/ in a browser -> paste any link
 
-# tests (offline, no network needed)
-python3 -m pytest tests/ -q          # 49 tests
+# as a CLI (one JSON document per process)
+python3 run_scan.py --target github.com/request/request --live | jq .
+python3 run_scan.py --health
+
+# tests
+python3 -m pytest tests/ -q          # 54 tests (49 offline + 5 online)
 ```
 
 ## Input routing (single input, automatic)
 
 | You paste | TRIAD does |
 |---|---|
-| `https://github.com/owner/repo` | downloads repo tarball, dependency lane (Trivy-derived) |
+| `https://github.com/owner/repo` (or bare `github.com/owner/repo`) | downloads repo tarball, dependency lane (Trivy-derived) |
 | `http(s)://site` or `site.example.com` | template lane (Nuclei-derived) + passive lane (ZAP-derived) |
 | `/local/dir` | dependency lane on a local checkout |
 
@@ -164,3 +169,13 @@ anyone else's infrastructure.
 python3 -m pytest tests/ -q      # 49 tests: engines, parsers, rules, live fixture, API
 python3 tests/fixture_server.py  # stand-alone "vulnerable target" for manual demos
 ```
+
+
+## Web console (self-hosted)
+
+`server.py` ships with a zero-dependency scan console at `GET /` (dark terminal
+design, single file `console.html`): paste any link, LIVE/DEMO toggle,
+per-severity filter tiles, CVE chips linked to NVD, evidence blocks,
+copy/download report JSON. It talks to the same `POST /scan` API, so the
+packaged engine and the hosted preview stay in lockstep. A clean scan (or an
+unreachable target) produces an honest `info` finding - never silence.

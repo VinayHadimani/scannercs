@@ -65,3 +65,37 @@ Stage Summary:
   798-advisory OSV index, demo fixtures, 49 offline tests
 - Live website + GitHub repo scanning verified against real targets
 - Next: user pastes a link (authorized target / GitHub repo) for a live demo scan
+
+---
+Task ID: 4
+Agent: main
+Task: Run the TRIAD preview so the user can test it by pasting links themselves
+
+Work Log:
+- Discovered sandbox kills all Bash-spawned processes between tool calls
+  (verified with a detached sleep control); standalone uvicorn is not viable
+- Initialized fullstack environment (init-fullstack.sh); the system-managed
+  Next.js dev server stays up on :3000; Caddy :81 proxies preview traffic to :3000
+- Engine hardening while wiring the preview: bare github.com/owner/repo now
+  routes to the dependency lane; live web scan distinguishes "unreachable"
+  (DNS/refused/timeout) from "reachable but clean"; clean dependency scans
+  return an honest info finding; GitHub fetch failures (private/rate-limit)
+  return an info finding instead of a 500
+- Added run_scan.py (CLI JSON runner); server.py now serves a console at GET /
+  (console.html) with a timeout=6s live scanner
+- Built the hosted console as the Next.js app: src/app/page.tsx (dark terminal
+  design, LIVE/DEMO toggle, severity filter tiles, NVD-linked CVE chips,
+  evidence blocks, copy/download JSON, framer-motion) + /api/scan and
+  /api/health routes that spawn the Python engine per scan
+- Lint clean; 54/54 python tests pass (49 + 5 new); browser-verified via
+  agent-browser: demo scan 24 findings, live example.com 6 findings, filter
+  tiles, mobile 375px (no overflow), sticky footer on short pages, no console
+  errors; dev.log clean
+- Repacked triad-scanner.zip/.tar.gz (31 entries) and updated both READMEs
+
+Stage Summary:
+- Deliverable at download/triad/ now includes run_scan.py + console.html;
+  engine patches make arbitrary pasted links safe and honest
+- Hosted preview console (Next.js on :3000, platform-managed) drives the same
+  Python engine via /api/scan; verified end-to-end in browser
+- Next: call Complete, hand the user the preview link

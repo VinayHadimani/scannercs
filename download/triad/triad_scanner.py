@@ -58,6 +58,12 @@ def classify_target(target: str) -> tuple[str, str]:
     if target.lower().startswith(("http://", "https://")):
         return "web", target
     if re.match(r"^[A-Za-z0-9_.-]+\.[A-Za-z]{2,}(:\d+)?(/.*)?$", target):
+        # bare "github.com/owner/repo" is unambiguous -> dependency lane
+        gm = re.match(r"^(?:www\.)?github\.com(/.+)$", target, re.I)
+        if gm:
+            seg = [s for s in gm.group(1).strip("/").split("/") if s and s != ".git"]
+            if len(seg) >= 2:
+                return "github", f"https://github.com/{seg[0]}/{seg[1].removesuffix('.git')}"
         return "web", "https://" + target          # bare host -> https
     return "invalid", target
 
@@ -1317,7 +1323,17 @@ class TRIAD_Scanner:
             files = local_repo_files(self.demo_dir)
             files = {k: v for k, v in files.items() if not k.startswith("web_")}
         elif target.startswith("https://github.com/") or target.startswith("http://github.com/"):
-            files = github_repo_files(target)
+            try:
+                files = github_repo_files(target)
+            except Exception as exc:                     # network / rate-limit / private
+                return [{
+                    "cve_id": None, "target_url": target, "severity": "info",
+                    "source_tool": "triad-derived",
+                    "description":
+                        "GitHub fetch failed (" + type(exc).__name__ +
+                        "). Public repos only: the tarball endpoint must be "
+                        "reachable and the repo must not be private.",
+                    "cwe": None, "evidence": str(exc)[:200], "fix": None}]
         else:
             files = local_repo_files(target)
         if not files:
@@ -1327,7 +1343,17 @@ class TRIAD_Scanner:
                 "description": "No dependency manifests (package.json, "
                                "requirements.txt, pyproject.toml) found.",
                 "cwe": None, "evidence": None, "fix": None}]
-        return self.deps.scan_manifests(files, target)
+        findings = self.deps.scan_manifests(files, target)
+        if not findings:
+            manifests = ", ".join(sorted(files)[:3]) + (" ..." if len(files) > 3 else "")
+            return [{
+                "cve_id": None, "target_url": target, "severity": "info",
+                "source_tool": "triad-derived",
+                "description":
+                    f"Clean scan: {len(files)} manifest(s) parsed ({manifests}) "
+                    "- no declared version matches any advisory in the index.",
+                "cwe": None, "evidence": None, "fix": None}]
+        return findings
 
     def _scan_web(self, target: str, demo: bool) -> list[dict]:
         base = target if target.count("/") > 3 else target.rstrip("/") + "/"
@@ -1343,6 +1369,15 @@ class TRIAD_Scanner:
         if root is not None:
             findings += self.passive_lane.scan(response_to_passive(root))
         if not findings:
+            if not demo and root is None:
+                return [{
+                    "cve_id": None, "target_url": base, "severity": "info",
+                    "source_tool": "triad-router",
+                    "description":
+                        f"Target unreachable: GET {base} produced no response "
+                        "(DNS failure, connection refused, or timeout). Verify "
+                        "the URL and that the host is reachable.",
+                    "cwe": None, "evidence": None, "fix": None}]
             return [{
                 "cve_id": None, "target_url": base, "severity": "info",
                 "source_tool": "triad-router",

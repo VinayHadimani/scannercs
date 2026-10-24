@@ -468,3 +468,59 @@ def test_fastapi_invalid_target():
     doc = r.json()
     assert doc["routed_as"] == "invalid"
     assert doc["findings"][0]["severity"] == "info"
+
+
+# -------------------------------------------------- routing + console + cli
+def test_classify_bare_github():
+    assert classify_target("github.com/expressjs/express")[0] == "github"
+    assert classify_target("github.com/a/b.git")[1] == "https://github.com/a/b"
+    assert classify_target("www.GitHub.com/a/b/tree/main")[1] == "https://github.com/a/b"
+    assert classify_target("github.com/expressjs")[0] == "web"          # org only
+    assert classify_target("example.com")[0] == "web"                    # unchanged
+
+
+def test_clean_scan_info_finding(tmp_path):
+    import triad_scanner as ts
+    # "left-pad" is not in the advisory index -> guaranteed zero matches
+    (tmp_path / "package.json").write_text(
+        '{"name": "cleanapp", "dependencies": {"left-pad": "1.3.0"}}',
+        encoding="utf-8")
+    scanner = ts.TRIAD_Scanner()
+    doc = scanner.scan(str(tmp_path), demo=False)
+    assert doc["routed_as"] == "local:trivy-dependencies"
+    assert doc["finding_count"] == 1
+    f = doc["findings"][0]
+    assert f["severity"] == "info" and f["cve_id"] is None
+    assert "Clean scan" in f["description"]
+
+
+def test_unreachable_live_target():
+    import triad_scanner as ts
+    scanner = ts.TRIAD_Scanner(timeout=2.0)
+    doc = scanner.scan("https://triad-definitely-unreachable.invalid", demo=False)
+    assert doc["finding_count"] == 1
+    assert "Target unreachable" in doc["findings"][0]["description"]
+
+
+def test_console_ui_served():
+    from fastapi.testclient import TestClient
+    import server as srv
+    client = TestClient(srv.app)
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+    assert "TRIAD" in r.text and "Paste any link" in r.text
+
+
+def test_run_scan_cli():
+    import json as _json
+    import subprocess
+    out = subprocess.run(
+        ["python3", "run_scan.py", "--target", "github.com/demo/repo", "--demo"],
+        capture_output=True, text=True, timeout=60, check=True)
+    doc = _json.loads(out.stdout)
+    assert doc["routed_as"] == "github:trivy-dependencies"
+    assert doc["finding_count"] > 100
+    out = subprocess.run(["python3", "run_scan.py", "--health"],
+                          capture_output=True, text=True, timeout=60, check=True)
+    assert _json.loads(out.stdout)["templates"] >= 12

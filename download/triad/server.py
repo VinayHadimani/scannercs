@@ -1,7 +1,8 @@
-"""FastAPI service exposing the TRIAD_Scanner.
+"""FastAPI service exposing the TRIAD_Scanner + web console.
 
-POST /scan  {"target": "<github repo or website url>", "demo": optional bool}
-GET  /health
+GET  /          scan console (console.html)
+GET  /health    service status
+POST /scan      {"target": "<github repo or website url>", "demo": optional bool}
 
 DEMO_MODE: set env TRIAD_DEMO_MODE=1 (or pass "demo": true) to scan the
 bundled fixtures instantly with zero network - the real engine still runs,
@@ -13,19 +14,24 @@ import os
 from typing import Optional
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from triad_scanner import TRIAD_Scanner
 
+_DIR = os.path.dirname(os.path.abspath(__file__))
+
 app = FastAPI(
     title="TRIAD Scanner",
-    version="1.1.0",
+    version="1.2.0",
     description="Single-input vulnerability scanner: GitHub repo URL -> "
                 "dependency CVEs (Trivy-derived); live website URL -> "
                 "template checks (Nuclei-derived) + passive rules "
                 "(ZAP-derived).",
 )
-_scanner = TRIAD_Scanner()
+# live requests get a 6s per-request budget (engine default 8s keeps the
+# packaged CLI conservative; the console prefers snappy feedback)
+_scanner = TRIAD_Scanner(timeout=6.0)
 
 
 class ScanRequest(BaseModel):
@@ -42,6 +48,11 @@ def _resolve_demo(req: "ScanRequest") -> bool:
     if req.demo is not None:
         return req.demo
     return os.environ.get("TRIAD_DEMO_MODE", "1") == "1"
+
+
+@app.get("/", include_in_schema=False)
+def console() -> FileResponse:
+    return FileResponse(os.path.join(_DIR, "console.html"), media_type="text/html")
 
 
 @app.get("/health")
